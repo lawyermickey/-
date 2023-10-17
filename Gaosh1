@@ -1,0 +1,81 @@
+# 导入必要的库
+import numpy as np
+import pandas as pd
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.model_selection import train_test_split, cross_val_score
+from sklearn.metrics import accuracy_score
+from sklearn.feature_selection import SelectKBest, f_classif
+
+# 读取数据文件
+y_train = pd.read_csv('Y_train.csv')
+x1_train = pd.read_csv('X1_train.csv')
+x2_train = pd.read_csv('X2_train.csv')
+x3_train = pd.read_csv('X3_train.csv')
+x1_test = pd.read_csv('X1_test.csv')
+x2_test = pd.read_csv('X2_test.csv')
+x3_test = pd.read_csv('X3_test.csv')
+
+# 将"复购频率"列的数据类型转换为整数
+y_train['复购频率'] = y_train['复购频率'].astype(int)
+
+# 重置"Y_train.csv"的索引列
+y_train = y_train.reset_index(drop=True)
+
+# 合并数据集
+train = y_train.merge(x1_train, on='客户编号').merge(x2_train, on='客户编号').merge(x3_train, on='客户编号')
+test = x1_test.merge(x2_test, on='客户编号').merge(x3_test, on='客户编号')
+
+# 预处理数据
+train.info()  # 查看数据信息
+
+# 分离分类变量和数值变量
+cat_cols = [col for col in train.columns if train[col].dtype == 'object']
+num_cols = [col for col in train.columns if col not in cat_cols]
+
+# 处理分类变量
+encoder = OneHotEncoder(sparse=False, handle_unknown='ignore')
+train_cat_encoded = encoder.fit_transform(train[cat_cols])
+test_cat_encoded = encoder.transform(test[cat_cols])
+
+# 处理数值变量
+train_num = train[num_cols].values
+test_num = test[num_cols].values
+
+# 合并编码后的分类变量和数值变量
+X_train = np.hstack((train['客户编号'].values.reshape(-1, 1), train_cat_encoded, train_num))
+X_test = np.hstack((test['客户编号'].values.reshape(-1, 1), test_cat_encoded, test_num))
+
+# 选择K个最佳特征
+k_best = SelectKBest(score_func=f_classif, k=100)  # 选择100个最佳特征
+X_train = k_best.fit_transform(X_train, y_train)
+X_test = k_best.transform(X_test)
+
+# 划分训练集和验证集
+y_train = train['复购频率']  # 确保'train'中包含'复购频率'列
+X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.2, random_state=42)
+
+# 创建随机森林分类器
+rf = RandomForestClassifier(n_estimators=100, max_depth=10, random_state=42)
+
+# 使用交叉验证评估模型性能
+cv_scores = cross_val_score(rf, X_train, y_train, cv=5, scoring='accuracy')
+print("Cross-Validation Accuracy Scores:", cv_scores)
+print("Mean CV Accuracy:", np.mean(cv_scores))
+
+# 训练模型
+rf.fit(X_train, y_train)
+
+# 预测验证集
+y_pred = rf.predict(X_val)
+
+# 计算三分类的加权准确率
+acc = accuracy_score(y_val, y_pred)
+print('The weighted accuracy score on the validation set is:', acc)
+
+# 预测测试集
+y_test = rf.predict(X_test)
+
+# 输出结果
+result = pd.DataFrame({'客户编号': test['客户编号'], '复购频率': y_test})
+result.to_csv('result.csv', index=False)
